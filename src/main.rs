@@ -26,6 +26,16 @@ fn load(file: &String) -> Vec<Password> {
     passwords
 }
 
+fn index(mut passwords: Vec<Password>) -> Vec<Password> {
+    let mut count: usize = 0;
+    for i in &mut passwords {
+        i.index = count;
+        count+=1;
+    }
+    passwords
+}
+
+
 fn search(passwords: Vec<Password>) {
     let search_term = input!("search service: ");
     let mut results: Vec<Password> = Vec::new();
@@ -75,7 +85,7 @@ fn remove_password(mut passwords: Vec<Password>) -> Vec<Password> {
         };
         num
     }
-    let index = get_usize() - 1;
+    let index = get_usize();
     passwords.remove(index);
     passwords
 }
@@ -93,6 +103,7 @@ fn rpass() {
     let mut passwords = load(&file);
     let mut changes: usize = 0;
     loop {
+        passwords = index(passwords);
         let command = input!(">> ");
         match &command as &str {
             "new" => {
