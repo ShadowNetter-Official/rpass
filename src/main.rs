@@ -108,7 +108,7 @@ fn rpass() {
         match &command as &str {
             "new" => {
                 passwords = new_password(passwords);
-                changes+=1;
+                save(&passwords, &file);
             },
             "list" => display_passwords(&passwords),
             "quit" => quit(changes),
