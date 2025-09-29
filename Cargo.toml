@@ -1,0 +1,10 @@
+[package]
+name = "rpass"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+prompted = "0.2.8"
+tabled = "0.20.0"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
