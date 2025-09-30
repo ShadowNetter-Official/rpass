@@ -1,7 +1,8 @@
-use tabled::{Tabled, Table, settings::{Style, object::Rows, Color}};
+use tabled::{Tabled, Table, settings::{Style, object::{Rows, Columns}, Remove, Color}};
 use std::{fs, env, process};
 use serde::{Serialize, Deserialize};
 use prompted::input;
+use arboard::Clipboard;
 
 const DEFAULT_FILE: &str = "passwords.json";
 
@@ -48,7 +49,7 @@ fn search(passwords: Vec<Password>) {
         println!("No results for {search_term}");
         return;
     }
-    display_passwords(&results);
+    display_passwords(&results, false);
 }
 
 fn save(data: &Vec<Password>, file: &String) {
@@ -90,15 +91,53 @@ fn remove_password(mut passwords: Vec<Password>) -> Vec<Password> {
     passwords
 }
 
-fn display_passwords(passwords: &Vec<Password>) {
+struct Clippy {
+    clipboard: Clipboard
+}
+
+impl Clippy {
+    fn init() -> Self {
+        Self {
+            clipboard: Clipboard::new().expect("error creating clipboard"),
+        }
+    }
+    fn copy_password(&mut self, passwords: &Vec<Password>) {
+        fn get_usize() -> usize {
+            let input = input!("index: ");
+            let num: usize = match input.parse::<usize>() {
+                Ok(num) => num,
+                Err(_) => {
+                    println!("invalid index");
+                    get_usize()
+                },
+            };
+            num
+        }
+        let index = get_usize();
+        let pass = &passwords[index].password;
+        match self.clipboard.set_text((&pass).to_string()) {
+            Ok(_) => println!("copied {pass} to clipboard"),
+            Err(e) => {
+                println!("error copying password: {e}");
+                println!("password was not copied");
+            },
+        }
+    }
+}
+
+fn display_passwords(passwords: &Vec<Password>, hide: bool) {
     let mut table = Table::new(passwords);
     table.with(Style::modern());
     table.modify(Rows::first(), Color::BG_BLACK);
+    if hide {
+        table.with(Remove::column(Columns::one(3)));
+    }
     println!("{table}");
 }
 
 fn rpass() {
-    let file = get_file();
+    let (file, hide) = get_args();
+    let mut clippy = Clippy::init();
     help();
     let mut passwords = load(&file);
     let mut changes: usize = 0;
@@ -110,7 +149,7 @@ fn rpass() {
                 passwords = new_password(passwords);
                 save(&passwords, &file);
             },
-            "list" => display_passwords(&passwords),
+            "list" => display_passwords(&passwords, hide),
             "quit" => quit(changes),
             "remove" => {
                 passwords = remove_password(passwords);
@@ -120,6 +159,7 @@ fn rpass() {
                 save(&passwords, &file);
                 changes = 0;
             },
+            "copy" => clippy.copy_password(&passwords),
             "clear" => clear(),
             "search" => search(passwords.clone()),
             "forcequit" => {
@@ -131,20 +171,45 @@ fn rpass() {
     }
 }
 
-fn get_file() -> String {
-    let argv: Vec<String> = env::args().collect();
-    if argv.len() < 2 {
-        println!("No file specified, opening default: {DEFAULT_FILE}");
-        return DEFAULT_FILE.to_string();
-    }
-    match &argv[1] as &str {
-        "-h" | "--help" => {
-            rhelp();
-            process::exit(0);
+fn get_args() -> (String, bool) {
+    let argv: Vec<String> = env::args().collect(); 
+    let mut hide: bool = false;
+    let mut file: String = String::new();
+    match argv.len() {
+        1 => {
+            // no args
+            println!("No file specified, opening default: {DEFAULT_FILE}");
+            return (DEFAULT_FILE.to_string(), hide);
         },
-        _ => (),
+        2 => {
+            // 1 arg
+            match &argv[1] as &str {
+                "-h" | "--help" => {
+                    rhelp();
+                    process::exit(0);
+                },
+                "--hidden" => {
+                    println!("No file specified, opening default: {DEFAULT_FILE}");
+                    hide = true;
+                    file = DEFAULT_FILE.to_string();
+                },
+                _ => file = (&argv[1]).to_string(),
+            }
+            return (file, hide);
+        },
+        _ => {
+            // catch all (only uses first 2 args excluding rpass)
+            match &argv[1] as &str {
+                "--hidden" => hide = true,
+                _ => file = (&argv[1]).to_string(),
+            }
+            match &argv[2] as &str {
+                "--hidden" => hide = true,
+                _ => file = (&argv[2]).to_string(),
+            }
+            return (file, hide);
+        },
     }
-    (&argv[1]).to_string()
 }
 
 fn rhelp() {
@@ -152,6 +217,7 @@ fn rhelp() {
     println!("usage: \n");
     println!("rpass <file.json> | if no file is found/provided passwords.json is created");
     println!("rpass -h, --help  | display this message");
+    println!("rpass --hidden    | only display passwords when searched");
 }
 
 fn help() {
@@ -164,6 +230,7 @@ fn help() {
     println!("clear     | clear screen");
     println!("remove    | remove password");
     println!("search    | search for service");
+    println!("copy      | copy password to clipboard");
     println!("help      | display this message\n");
 }
 
