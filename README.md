@@ -2,6 +2,8 @@
 
 A CLI password manager written in **Rust** 🦀
 
+DISCLAIMER: passwords files aren't encrypted
+
 ---
 
 ![Overview](screenshots/overview.gif)
