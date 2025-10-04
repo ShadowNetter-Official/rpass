@@ -46,6 +46,13 @@ sudo cp target/release/rpass /bin/
 ![Usage](screenshots/help.png)
 
 ---
+## Features
+
+- encryption
+- export passwords
+- copy passwords to clipboard
+
+---
 
 ## Removing
 
