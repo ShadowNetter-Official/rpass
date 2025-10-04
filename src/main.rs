@@ -4,9 +4,6 @@ use serde::{Serialize, Deserialize};
 use prompted::input;
 use arboard::Clipboard;
 
-const DEFAULT_FILE: &str = "passwords.json";
-
-
 #[derive(Tabled, Debug, Serialize, Deserialize, Clone)]
 struct Password {
     service: String,
@@ -17,11 +14,8 @@ struct Password {
 }
 
 fn load(file: &String) -> Vec<Password> {
-    let passwords = match fs::read_to_string(file) {
-        Ok(passwords) => match serde_json::from_str(&passwords) {
-            Ok(p) => p,
-            Err(_) => Vec::<Password>::new(),
-        },
+    let passwords = match serde_json::from_str(file) {
+        Ok(p) => p,
         Err(_) => Vec::<Password>::new(),
     };
     passwords
@@ -52,15 +46,15 @@ fn search(passwords: Vec<Password>) {
     display_passwords(&results, false);
 }
 
-fn save(data: &Vec<Password>, file: &String) {
+fn get_content(data: &Vec<Password>) -> String {
+    serde_json::to_string_pretty(data).unwrap()
+}
+
+fn save(data: &Vec<Password>, file: &String, key: &Vec<u32>) -> usize {
     let json = serde_json::to_string_pretty(data).unwrap();
-    match fs::write(file, json) {
-        Ok(_) => (),
-        Err(e) => {
-            println!("error writing to file: {file}\n {e}");
-            return;
-        },
-    }
+    let new_data = vignere(&json, key, true);
+    write_to_file(new_data, file);
+    0
 }
 
 fn new_password(mut passwords: Vec<Password>) -> Vec<Password> {
@@ -116,7 +110,7 @@ impl Clippy {
         let index = get_usize();
         let pass = &passwords[index].password;
         match self.clipboard.set_text((&pass).to_string()) {
-            Ok(_) => println!("copied {pass} to clipboard"),
+            Ok(_) => println!("copied password to clipboard"),
             Err(e) => {
                 println!("error copying password: {e}");
                 println!("password was not copied");
@@ -136,10 +130,18 @@ fn display_passwords(passwords: &Vec<Password>, hide: bool) {
 }
 
 fn rpass() {
-    let (file, hide) = get_args();
+    let (file_path, hide, encrypt, encryption_key) = get_args();
+    let file = load_file(&file_path);
+    if encrypt {
+        let key = get_key();
+        let content = vignere(&file, &key, encrypt);
+        write_to_file(content, &file_path);
+        quit(0);
+    }
     let mut clippy = Clippy::init();
     help();
-    let mut passwords = load(&file);
+    let file_content = vignere(&file, &encryption_key, encrypt);
+    let mut passwords = load(&file_content);
     let mut changes: usize = 0;
     loop {
         passwords = index(passwords);
@@ -147,17 +149,14 @@ fn rpass() {
         match &command as &str {
             "new" => {
                 passwords = new_password(passwords);
-                save(&passwords, &file);
+                changes+=1;
             },
             "list" => display_passwords(&passwords, hide),
+            "save" => changes = save(&passwords, &file_path, &encryption_key),
             "quit" => quit(changes),
             "remove" => {
                 passwords = remove_password(passwords);
                 changes+=1;
-            },
-            "save" => {
-                save(&passwords, &file);
-                changes = 0;
             },
             "copy" => clippy.copy_password(&passwords),
             "clear" => clear(),
@@ -166,58 +165,58 @@ fn rpass() {
                 clear();
                 break;
             },
+            "export" => {
+                let export_content = get_content(&passwords);
+                export(&export_content);
+            },
             _ => help(),
         }
     }
 }
 
-fn get_args() -> (String, bool) {
+fn get_args() -> (String, bool, bool, Vec<u32>) {
     let argv: Vec<String> = env::args().collect(); 
-    let mut hide: bool = false;
+    let mut encrypt: bool = false;
     let mut file: String = String::new();
     match argv.len() {
-        1 => {
-            // no args
-            println!("No file specified, opening default: {DEFAULT_FILE}");
-            return (DEFAULT_FILE.to_string(), hide);
+        1..3 => {
+            // less than 3 args
+            rhelp();
+            process::exit(1);
         },
-        2 => {
-            // 1 arg
+        3 => {
+            // 3 args (rpass <file> --encrypt)
+            // or rpass --encrypt <file>
             match &argv[1] as &str {
-                "-h" | "--help" => {
-                    rhelp();
-                    process::exit(0);
-                },
-                "--hidden" => {
-                    println!("No file specified, opening default: {DEFAULT_FILE}");
-                    hide = true;
-                    file = DEFAULT_FILE.to_string();
-                },
-                _ => file = (&argv[1]).to_string(),
-            }
-            return (file, hide);
-        },
-        _ => {
-            // catch all (only uses first 2 args excluding rpass)
-            match &argv[1] as &str {
-                "--hidden" => hide = true,
+                "--encrypt" => encrypt = true,
                 _ => file = (&argv[1]).to_string(),
             }
             match &argv[2] as &str {
-                "--hidden" => hide = true,
+                "--encrypt" => encrypt = true,
                 _ => file = (&argv[2]).to_string(),
             }
-            return (file, hide);
+            return (file, false, encrypt, Vec::<u32>::new())
         },
+        4 => {
+            // 4 args(rpass <file> --key >key>)
+            let key = convert_key(&argv[3]);
+            return (argv[1].clone(), false, encrypt, key)
+        },
+        _ => {
+            // 5 args (rpass <file> --hidden --key <key>)
+            let key = convert_key(&argv[4]);
+            return (argv[1].clone(), true, encrypt, key)
+        }
     }
 }
 
 fn rhelp() {
     println!("rpass | a CLI password manager written in Rust 🦀\n");
     println!("usage: \n");
-    println!("rpass <file.json> | if no file is found/provided passwords.json is created");
-    println!("rpass -h, --help  | display this message");
-    println!("rpass --hidden    | only display passwords when searched");
+    println!("rpass <file.json> --key <KEY>               | open json file and decrypts it with key (file must be encrypted first)");
+    println!("rpass -h, --help                            | display this message");
+    println!("rpass <file.json> --hidden --key <KEY>      | only display passwords when searched");
+    println!("rpass --encrypt <file.json>                 | encrypts <file.json>");
 }
 
 fn help() {
@@ -232,6 +231,7 @@ fn help() {
     println!("search    | search for service");
     println!("copy      | copy password to clipboard");
     println!("help      | display this message\n");
+    println!("export    | unencrypt and export passwords to json");
 }
 
 
@@ -241,7 +241,6 @@ fn clear() {
 
 fn quit(changes: usize) {
     if changes < 1 {
-        clear();
         process::exit(0);
     }
     println!("You have {changes} unsaved changes");
@@ -250,4 +249,74 @@ fn quit(changes: usize) {
 
 fn main() {
     rpass();
+}
+
+fn write_to_file(content: String, file: &String) {
+    match fs::write(file, content) {
+        Ok(_) => (),
+        Err(e) => {
+            println!("error writing to {file}: {e}");
+            quit(0);
+        },
+    }
+}
+
+fn load_file(file: &String) -> String {
+    let content = match fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(e) => {
+            println!("error reading {file}: {e}");
+            process::exit(1);
+        }
+    };
+    content
+}
+
+fn caesar(target: char, shift: u32, encrypt: bool) -> char {
+    if !target.is_ascii_lowercase() { return target; }
+    let ascii = target as u8 - b'a';
+    let shifted = if encrypt {
+        (ascii + (shift as u8)) % 26
+    } else {
+        (26 + ascii - (shift as u8 % 26)) % 26
+    };
+    (b'a' + shifted) as char
+}
+
+fn vignere(pass: &String, key: &Vec<u32>, encrypt: bool) -> String {
+    let len = key.len();
+    pass.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            let shift = key[i%len];
+            caesar(c, shift, encrypt)
+        })
+        .collect()
+}
+
+fn get_key() -> Vec<u32> {
+    let key = input!("Key (DO NOT FORGET THIS KEY) >> ");
+    convert_key(&key)
+}
+
+fn convert_key(key: &String) -> Vec<u32> {
+    if !key.chars().all(|c| c.is_ascii_alphabetic()) {
+        println!("Key must contain only ASCII letters");
+        process::exit(1);
+    }
+    key.to_lowercase().chars().map(|c| (c as u8 - b'a') as u32).collect()
+}
+
+fn export(content: &String) {
+    // save content to new file
+    let file_name = input!("File name: ");
+    match fs::File::create(&file_name) {
+        Ok(_) => (),
+        Err(e) => {
+            println!("error creating {file_name}: {e}");
+            process::exit(1);
+        }
+    };
+    write_to_file(content.to_string(), &file_name);
+    println!("exported passwords unencrypted to {file_name}");
 }
