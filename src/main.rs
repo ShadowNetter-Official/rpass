@@ -230,8 +230,8 @@ fn help() {
     println!("remove    | remove password");
     println!("search    | search for service");
     println!("copy      | copy password to clipboard");
-    println!("help      | display this message\n");
-    println!("export    | unencrypt and export passwords to json");
+    println!("help      | display this message");
+    println!("export    | unencrypt and export passwords to json\n");
 }
 
 
